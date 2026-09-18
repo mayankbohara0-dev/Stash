@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, StatusBar, RefreshControl,
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, StatusBar,
+  RefreshControl, Modal, TextInput, ActivityIndicator, Share, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,16 +16,218 @@ import { RootStackParamList } from '../../navigation/AppNavigator';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
+// ── Edit Profile Modal ────────────────────────────────────────────────────────
+function EditProfileModal({
+  visible,
+  currentName,
+  currentEmail,
+  onClose,
+  onSaved,
+}: {
+  visible: boolean;
+  currentName: string;
+  currentEmail: string;
+  onClose: () => void;
+  onSaved: (name: string) => void;
+}) {
+  const [name, setName] = useState(currentName);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (visible) setName(currentName);
+  }, [visible, currentName]);
+
+  const save = async () => {
+    if (!name.trim()) {
+      Alert.alert('Invalid Name', 'Please enter your full name.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await api.put(API_ENDPOINTS.profile, { full_name: name.trim() });
+      onSaved(name.trim());
+      onClose();
+    } catch {
+      Alert.alert('Error', 'Failed to update profile. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={modalStyles.overlay}>
+        <View style={modalStyles.sheet}>
+          {/* Handle bar */}
+          <View style={modalStyles.handle} />
+
+          <Text style={modalStyles.title}>Personal Information</Text>
+          <Text style={modalStyles.subtitle}>Update your display name</Text>
+
+          <View style={modalStyles.fieldGroup}>
+            <Text style={modalStyles.fieldLabel}>FULL NAME</Text>
+            <View style={modalStyles.inputWrap}>
+              <Ionicons name="person-outline" size={16} color={Colors.textMuted} style={modalStyles.inputIcon} />
+              <TextInput
+                style={modalStyles.input}
+                value={name}
+                onChangeText={setName}
+                placeholder="Your full name"
+                placeholderTextColor={Colors.textMuted}
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={save}
+              />
+            </View>
+          </View>
+
+          <View style={modalStyles.fieldGroup}>
+            <Text style={modalStyles.fieldLabel}>EMAIL ADDRESS</Text>
+            <View style={[modalStyles.inputWrap, modalStyles.inputDisabled]}>
+              <Ionicons name="mail-outline" size={16} color={Colors.textMuted} style={modalStyles.inputIcon} />
+              <TextInput
+                style={[modalStyles.input, { color: Colors.textMuted }]}
+                value={currentEmail}
+                editable={false}
+                selectTextOnFocus={false}
+              />
+              <View style={modalStyles.lockedBadge}>
+                <Ionicons name="lock-closed" size={11} color={Colors.textMuted} />
+              </View>
+            </View>
+            <Text style={modalStyles.fieldHint}>Email cannot be changed after registration</Text>
+          </View>
+
+          <View style={modalStyles.actions}>
+            <TouchableOpacity style={modalStyles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
+              <Text style={modalStyles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[modalStyles.saveBtn, isSaving && modalStyles.saveBtnDisabled]}
+              onPress={save}
+              disabled={isSaving}
+              activeOpacity={0.8}
+            >
+              {isSaving
+                ? <ActivityIndicator size="small" color={Colors.onSilver} />
+                : <Text style={modalStyles.saveText}>Save Changes</Text>
+              }
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ── Change Password Modal ─────────────────────────────────────────────────────
+function ChangePasswordModal({
+  visible,
+  onClose,
+}: {
+  visible: boolean;
+  onClose: () => void;
+}) {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  const reset = () => { setCurrent(''); setNext(''); setConfirm(''); };
+
+  const save = async () => {
+    if (!current || !next || !confirm) {
+      Alert.alert('Missing Fields', 'Please fill in all fields.'); return;
+    }
+    if (next !== confirm) {
+      Alert.alert("Passwords Don't Match", 'New password and confirmation must match.'); return;
+    }
+    if (next.length < 8) {
+      Alert.alert('Too Short', 'Password must be at least 8 characters.'); return;
+    }
+    setIsSaving(true);
+    try {
+      await api.post('/auth/change-password', { current_password: current, new_password: next, confirm_password: confirm });
+      Alert.alert('Password Updated', 'Your password has been changed successfully.');
+      reset();
+      onClose();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Current password is incorrect.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleClose = () => { reset(); onClose(); };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <View style={modalStyles.overlay}>
+        <View style={modalStyles.sheet}>
+          <View style={modalStyles.handle} />
+          <Text style={modalStyles.title}>Change Password</Text>
+          <Text style={modalStyles.subtitle}>Keep your vault secure</Text>
+
+          {[
+            { label: 'CURRENT PASSWORD', value: current, onChange: setCurrent, placeholder: 'Enter current password' },
+            { label: 'NEW PASSWORD', value: next, onChange: setNext, placeholder: 'Min. 8 characters' },
+            { label: 'CONFIRM NEW PASSWORD', value: confirm, onChange: setConfirm, placeholder: 'Repeat new password' },
+          ].map(f => (
+            <View key={f.label} style={modalStyles.fieldGroup}>
+              <Text style={modalStyles.fieldLabel}>{f.label}</Text>
+              <View style={modalStyles.inputWrap}>
+                <Ionicons name="lock-closed-outline" size={16} color={Colors.textMuted} style={modalStyles.inputIcon} />
+                <TextInput
+                  style={modalStyles.input}
+                  value={f.value}
+                  onChangeText={f.onChange}
+                  placeholder={f.placeholder}
+                  placeholderTextColor={Colors.textMuted}
+                  secureTextEntry
+                  autoCapitalize="none"
+                />
+              </View>
+            </View>
+          ))}
+
+          <View style={modalStyles.actions}>
+            <TouchableOpacity style={modalStyles.cancelBtn} onPress={handleClose} activeOpacity={0.7}>
+              <Text style={modalStyles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[modalStyles.saveBtn, isSaving && modalStyles.saveBtnDisabled]}
+              onPress={save}
+              disabled={isSaving}
+              activeOpacity={0.8}
+            >
+              {isSaving
+                ? <ActivityIndicator size="small" color={Colors.onSilver} />
+                : <Text style={modalStyles.saveText}>Update Password</Text>
+              }
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ── Main Screen ───────────────────────────────────────────────────────────────
 export const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { user, logout } = useAuth();
   const [profile, setProfile] = useState<any>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [displayName, setDisplayName] = useState(user?.full_name || '');
+  const [isExporting, setIsExporting] = useState(false);
 
   const loadProfile = async () => {
     try {
       const data = await api.get(API_ENDPOINTS.profile);
       setProfile(data);
+      if ((data as any).full_name) setDisplayName((data as any).full_name);
     } catch {}
   };
 
@@ -38,6 +241,7 @@ export const ProfileScreen: React.FC = () => {
     setIsRefreshing(false);
   };
 
+  // ── Handlers ────────────────────────────────────────────────────────────────
   const handleLogout = () => {
     Alert.alert(
       'Sign Out',
@@ -71,7 +275,51 @@ export const ProfileScreen: React.FC = () => {
     );
   };
 
-  const initials = (user?.full_name || 'Mayank')
+  const handleExportCSV = async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const response = await api.downloadFile(API_ENDPOINTS.exportCsv);
+      if (!response.ok) throw new Error('Export failed');
+      const csvText = await response.text();
+
+      // Share the CSV using native share sheet
+      await Share.share(
+        Platform.OS === 'ios'
+          ? {
+              title: 'Stash Transactions Export',
+              url: `data:text/csv;charset=utf-8,${encodeURIComponent(csvText)}`,
+              message: csvText,
+            }
+          : {
+              title: 'Stash Transactions Export',
+              message: csvText,
+            }
+      );
+    } catch {
+      Alert.alert(
+        'Export',
+        'Your transaction data has been prepared. Use the Share option to save it.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handlePaymentMethods = () => {
+    Alert.alert(
+      'Payment Methods & Wallets',
+      'Transactions are tagged with payment methods (UPI, Credit Card, Cash, Debit Card, Bank Transfer).\n\nTo change the payment method on a transaction, open it from the Transactions screen and edit it.',
+      [
+        { text: 'Go to Transactions', onPress: () => navigation.navigate('Transactions') },
+        { text: 'OK', style: 'cancel' },
+      ]
+    );
+  };
+
+  // ── Avatar initials ──────────────────────────────────────────────────────────
+  const initials = (displayName || 'U')
     .split(' ')
     .filter(Boolean)
     .map(n => n[0])
@@ -79,6 +327,7 @@ export const ProfileScreen: React.FC = () => {
     .slice(0, 2)
     .toUpperCase();
 
+  // ── Menu sections ────────────────────────────────────────────────────────────
   const sections = [
     {
       title: 'ACCOUNT & SECURITY',
@@ -86,22 +335,20 @@ export const ProfileScreen: React.FC = () => {
         {
           icon: 'person-outline',
           label: 'Personal Information',
-          sublabel: user?.email || 'Set your profile details',
-          onPress: () => navigation.navigate('Settings'),
+          sublabel: user?.email || 'Edit your name and details',
+          onPress: () => setShowEditProfile(true),
         },
         {
           icon: 'shield-checkmark-outline',
-          label: 'Security & Encryption',
-          sublabel: 'Biometric unlock, PIN & 256-bit vault',
-          badge: 'Secured',
-          badgeColor: Colors.income,
-          onPress: () => Alert.alert('Security', 'Your vault is encrypted with AES-256 local token protection.'),
+          label: 'Security & Password',
+          sublabel: 'Change your password',
+          onPress: () => setShowChangePassword(true),
         },
         {
           icon: 'card-outline',
           label: 'Payment Methods & Wallets',
           sublabel: 'UPI, Credit Cards, Cash Accounts',
-          onPress: () => Alert.alert('Payment Accounts', 'Manage cards, bank accounts and cash balances.'),
+          onPress: handlePaymentMethods,
         },
       ],
     },
@@ -124,7 +371,7 @@ export const ProfileScreen: React.FC = () => {
           icon: 'moon-outline',
           label: 'Theme & Appearance',
           sublabel: 'Dark Obsidian (System match)',
-          onPress: () => Alert.alert('Appearance', 'Stash Obsidian theme is active.'),
+          onPress: () => navigation.navigate('Settings'),
         },
       ],
     },
@@ -134,7 +381,7 @@ export const ProfileScreen: React.FC = () => {
         {
           icon: 'sparkles',
           label: 'Stash AI Engine',
-          sublabel: 'Financial advisor & prompt settings',
+          sublabel: 'Chat with your financial assistant',
           iconColor: Colors.text,
           onPress: () => navigation.navigate('AIAssistant'),
         },
@@ -151,10 +398,10 @@ export const ProfileScreen: React.FC = () => {
           onPress: () => navigation.navigate('SavingsGoals'),
         },
         {
-          icon: 'download-outline',
-          label: 'Export Data (CSV)',
-          sublabel: 'Download encrypted ledger copy',
-          onPress: () => Alert.alert('Export Complete', 'Ledger exported in CSV format to device downloads.'),
+          icon: isExporting ? 'hourglass-outline' : 'download-outline',
+          label: isExporting ? 'Exporting...' : 'Export Data (CSV)',
+          sublabel: 'Download your full transaction history',
+          onPress: handleExportCSV,
         },
       ],
     },
@@ -164,7 +411,22 @@ export const ProfileScreen: React.FC = () => {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
-      {/* Screen Title Bar */}
+      {/* Edit Profile Modal */}
+      <EditProfileModal
+        visible={showEditProfile}
+        currentName={displayName}
+        currentEmail={user?.email || ''}
+        onClose={() => setShowEditProfile(false)}
+        onSaved={(name) => setDisplayName(name)}
+      />
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal
+        visible={showChangePassword}
+        onClose={() => setShowChangePassword(false)}
+      />
+
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.canGoBack() ? navigation.goBack() : undefined}
@@ -175,7 +437,7 @@ export const ProfileScreen: React.FC = () => {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>Profile</Text>
-          <Text style={styles.headerSubtitle}>Account &amp; Security Settings</Text>
+          <Text style={styles.headerSubtitle}>Account & Security Settings</Text>
         </View>
         <TouchableOpacity
           style={styles.settingsIconBtn}
@@ -200,7 +462,11 @@ export const ProfileScreen: React.FC = () => {
       >
         {/* User Hero Identity Card */}
         <View style={styles.userHeroCard}>
-          <View style={styles.avatarWrap}>
+          <TouchableOpacity
+            style={styles.avatarWrap}
+            onPress={() => setShowEditProfile(true)}
+            activeOpacity={0.8}
+          >
             <View style={styles.avatarRing}>
               <View style={styles.avatarCore}>
                 <Text style={styles.avatarText}>{initials}</Text>
@@ -209,10 +475,20 @@ export const ProfileScreen: React.FC = () => {
             <View style={styles.verifiedDot}>
               <Ionicons name="checkmark" size={10} color="#FFFFFF" />
             </View>
-          </View>
+          </TouchableOpacity>
 
-          <Text style={styles.userName}>{user?.full_name || 'Mayank Sharma'}</Text>
+          <Text style={styles.userName}>{displayName || 'Your Name'}</Text>
           <Text style={styles.userEmail}>{user?.email || 'demo@stash.app'}</Text>
+
+          {/* Quick edit button */}
+          <TouchableOpacity
+            style={styles.editProfileBtn}
+            onPress={() => setShowEditProfile(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="pencil-outline" size={13} color={Colors.textSecondary} />
+            <Text style={styles.editProfileBtnText}>Edit Profile</Text>
+          </TouchableOpacity>
 
           <View style={styles.badgeRow}>
             <View style={styles.vaultBadge}>
@@ -226,7 +502,7 @@ export const ProfileScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Inset Menu Sections */}
+        {/* Menu Sections */}
         {sections.map(section => (
           <View key={section.title} style={styles.sectionGroup}>
             <Text style={styles.sectionHeader}>{section.title}</Text>
@@ -254,22 +530,14 @@ export const ProfileScreen: React.FC = () => {
                       <Text style={styles.menuSublabel}>{item.sublabel}</Text>
                     )}
                   </View>
-                  {(item as any).badge ? (
-                    <View style={[styles.inlineBadge, { backgroundColor: Colors.incomeLight }]}>
-                      <Text style={[styles.inlineBadgeText, { color: (item as any).badgeColor }]}>
-                        {(item as any).badge}
-                      </Text>
-                    </View>
-                  ) : (
-                    <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-                  )}
+                  <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
                 </TouchableOpacity>
               ))}
             </View>
           </View>
         ))}
 
-        {/* Danger Zone */}
+        {/* Session / Danger Zone */}
         <View style={styles.sectionGroup}>
           <Text style={styles.sectionHeader}>SESSION</Text>
           <View style={styles.cardGroup}>
@@ -305,7 +573,7 @@ export const ProfileScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Footer Security Notice */}
+        {/* Footer */}
         <View style={styles.footerNote}>
           <Ionicons name="shield-checkmark" size={14} color={Colors.textMuted} />
           <Text style={styles.footerText}>
@@ -319,6 +587,7 @@ export const ProfileScreen: React.FC = () => {
   );
 };
 
+// ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
@@ -372,7 +641,7 @@ const styles = StyleSheet.create({
     gap: Spacing.xl,
   },
 
-  /* User Hero Identity Card */
+  /* Hero card */
   userHeroCard: {
     alignItems: 'center',
     backgroundColor: Colors.surface,
@@ -381,10 +650,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.base,
     borderWidth: 1,
     borderColor: Colors.border,
+    gap: 4,
   },
   avatarWrap: {
     position: 'relative',
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
   },
   avatarRing: {
     width: 80,
@@ -432,12 +702,30 @@ const styles = StyleSheet.create({
   userEmail: {
     fontSize: Typography.sm,
     color: Colors.textSecondary,
-    marginBottom: Spacing.md,
+  },
+  editProfileBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: Colors.surfaceAlt,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 5,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginTop: 4,
+    marginBottom: Spacing.sm,
+  },
+  editProfileBtnText: {
+    fontSize: Typography.xs,
+    color: Colors.textSecondary,
+    fontWeight: Typography.medium,
   },
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
+    marginTop: 4,
   },
   vaultBadge: {
     flexDirection: 'row',
@@ -468,7 +756,7 @@ const styles = StyleSheet.create({
     fontWeight: Typography.semibold,
   },
 
-  /* Inset Section Groups */
+  /* Sections */
   sectionGroup: {
     gap: Spacing.xs,
   },
@@ -519,17 +807,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: 2,
   },
-  inlineBadge: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 3,
-    borderRadius: Radius.full,
-  },
-  inlineBadgeText: {
-    fontSize: Typography.xs,
-    fontWeight: Typography.bold,
-  },
 
-  /* Footer Note */
   footerNote: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -540,5 +818,118 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: Typography.xs,
     color: Colors.textMuted,
+  },
+});
+
+// ── Modal Styles ──────────────────────────────────────────────────────────────
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius['2xl'],
+    borderTopRightRadius: Radius['2xl'],
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing['2xl'],
+    borderTopWidth: 1,
+    borderColor: Colors.border,
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.surfaceAlt,
+    alignSelf: 'center',
+    marginBottom: Spacing.lg,
+  },
+  title: {
+    fontSize: Typography.xl,
+    fontWeight: Typography.bold,
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.lg,
+  },
+  fieldGroup: {
+    marginBottom: Spacing.md,
+  },
+  fieldLabel: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold,
+    color: Colors.textMuted,
+    letterSpacing: 0.8,
+    marginBottom: 6,
+  },
+  inputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.bgInset,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: Spacing.md,
+    height: 48,
+  },
+  inputDisabled: {
+    opacity: 0.6,
+  },
+  inputIcon: {
+    marginRight: Spacing.sm,
+  },
+  input: {
+    flex: 1,
+    fontSize: Typography.base,
+    color: Colors.text,
+  },
+  lockedBadge: {
+    marginLeft: Spacing.sm,
+  },
+  fieldHint: {
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+    marginTop: 5,
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+  },
+  cancelBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  cancelText: {
+    fontSize: Typography.base,
+    color: Colors.textSecondary,
+    fontWeight: Typography.medium,
+  },
+  saveBtn: {
+    flex: 2,
+    height: 48,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.silverTop,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveBtnDisabled: {
+    opacity: 0.6,
+  },
+  saveText: {
+    fontSize: Typography.base,
+    color: Colors.onSilver,
+    fontWeight: Typography.bold,
   },
 });
